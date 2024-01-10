@@ -97,6 +97,7 @@ void menu_init(void);
 menu_ret menu_goto_sleep(void);
 menu_ret menu_exit(void);
 menu_ret menu_berlin_dance(void);
+menu_ret menu_goto_main(void);
 
 menu_ret menu_get_goto_sleep(void);
 menu_ret menu_send_rgb_mode(uint8_t mode);
