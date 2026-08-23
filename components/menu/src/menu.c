@@ -80,7 +80,7 @@ menu_item_t m_main_array[] =
         // Descripción                 //Acción             //Siguiente menu      ó     //Función
         //  {menu_main_description[0],    MA_MENU,                BLUETOOTH_MENU,             0},
         {menu_main_description[0], MA_MENU, LED_MODE_MENU, 0},
-       // {menu_main_description[1], MA_FUNCTION, NONE, &berlinDance},
+        {menu_main_description[1], MA_FUNCTION, NONE, &menu_berlin_dance},
         {menu_main_description[2], MA_FUNCTION, NONE, &menu_exit},
         {0, MA_END, 0, 0}};
 // ------------------Bluetooth Menu-------------------------------
@@ -468,6 +468,13 @@ menu_ret menu_goto_sleep(void)
 menu_ret menu_exit(void)
 {
   return mret_exit;
+}
+
+// berlinDance() is void(void) and cannot fill a menu_ret(*)(void) slot directly.
+menu_ret menu_berlin_dance(void)
+{
+  berlinDance();
+  return mret_none;
 }
 
 menu_ret menu_get_goto_sleep(void)
