@@ -680,6 +680,16 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 					HIDD_LE_IDX_NB, 0);
 			memcpy(battery_table, param->add_attr_tab.handles, sizeof(battery_table));
 		}
+		if (param->add_attr_tab.num_handle == DIS_IDX_NB
+				&& param->add_attr_tab.svc_uuid.uuid.uuid16
+						== ESP_GATT_UUID_DEVICE_INFO_SVC
+				&& param->add_attr_tab.status == ESP_GATT_OK) {
+			ESP_LOGI(HID_LE_PRF_TAG,
+					"device information service added, handle = %d, vid %04x pid %04x",
+					param->add_attr_tab.handles[DIS_IDX_SVC], DEEPDECK_VID,
+					DEEPDECK_PID);
+			esp_ble_gatts_create_attr_tab(bas_att_db, gatts_if, BAS_IDX_NB, 0);
+		}
 		if (param->add_attr_tab.num_handle == HIDD_LE_IDX_NB
 				&& param->add_attr_tab.status == ESP_GATT_OK) {
 			memcpy(hidd_le_env.hidd_inst.att_tbl, param->add_attr_tab.handles,
@@ -689,11 +699,6 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 			hid_add_id_tbl();
 			esp_ble_gatts_start_service(
 					hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
-			/* Device Information last. It is independent of the other two -
-			 * the HID service includes the battery service, which is why that
-			 * one has to be registered first. The event for this table falls
-			 * through to the else below, which starts it. */
-			esp_ble_gatts_create_attr_tab(dis_att_db, gatts_if, DIS_IDX_NB, 0);
 		} else {
 			esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
 		}
@@ -706,9 +711,15 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 }
 
 void hidd_le_create_service(esp_gatt_if_t gatts_if) {
-	/* Here should added the battery service first, because the hid service should include the battery service.
-	 After finish to added the battery service then can added the hid service. */
-	esp_ble_gatts_create_attr_tab(bas_att_db, gatts_if, BAS_IDX_NB, 0);
+	/* Tables are added one at a time, each chained off the previous one's
+	 * ESP_GATTS_CREAT_ATTR_TAB_EVT. The order matters twice over:
+	 *   - every table has to be registered before any service is started;
+	 *     a create_attr_tab issued after esp_ble_gatts_start_service()
+	 *     returns ESP_OK but never produces an event.
+	 *   - the battery service has to precede the HID service, because the
+	 *     HID service includes it.
+	 * Device Information is independent, so it goes first. */
+	esp_ble_gatts_create_attr_tab(dis_att_db, gatts_if, DIS_IDX_NB, 0);
 
 }
 
