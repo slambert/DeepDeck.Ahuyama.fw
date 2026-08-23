@@ -28,8 +28,10 @@
 
 #include "esp_system.h"
 #include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "esp_log.h"
 #include "driver/gpio.h"
-#include "driver/adc.h"
 #include "keyboard_config.h"
 
 #include "battery_monitor.h"
@@ -37,7 +39,10 @@
 #define DEFAULT_VREF    1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES   500          //Multisampling
 
-static adc_oneshot_unit_handle_t adc_handle;
+static const char *TAG = "BATT";
+
+static adc_oneshot_unit_handle_t adc_handle = NULL;
+static adc_cali_handle_t adc_cali_handle = NULL;
 static const adc_channel_t channel = BATT_PIN;
 static const adc_atten_t atten = ADC_ATTEN_DB_2_5;
 
@@ -46,39 +51,79 @@ uint32_t voltage = 0;
 //static esp_adc_cal_characteristics_t *adc_chars;
 //check battery level
 uint32_t get_battery_level(void) {
-    int adc_reading = 0;
-    int raw = 0;
-	//Multisampling
+	int64_t adc_sum = 0;
+	int adc_reading = 0;
+	int raw = 0;
+	int voltage_mv = 0;
 
-	for (int i = 0; i < NO_OF_SAMPLES; i++) {
-        adc_oneshot_read(adc_handle, channel, &raw);
-        adc_reading += raw;
+	if (adc_handle == NULL) {
+		ESP_LOGE(TAG, "ADC not initialised");
+		return 0;
 	}
-	adc_reading /= NO_OF_SAMPLES;
 
-	//Convert adc_reading to voltage in mV
-	// For ESP-IDF v5.x, use adc_cali_raw_to_voltage or calculate manually
-    // Here, we use the formula: voltage = (adc_reading * reference_voltage) / max_adc
-    // For 12-bit ADC, max_adc = 4095, reference_voltage = 1100mV (default)
-    voltage = (adc_reading * 1100) / 4095;
+	// Multisampling
+	for (int i = 0; i < NO_OF_SAMPLES; i++) {
+		if (adc_oneshot_read(adc_handle, channel, &raw) != ESP_OK) {
+			ESP_LOGE(TAG, "ADC read failed");
+			return 0;
+		}
+		adc_sum += raw;
+	}
+	adc_reading = (int)(adc_sum / NO_OF_SAMPLES);
 
-    uint32_t battery_percent = ((voltage - Vout_min) * 100 / (Vout_max - Vout_min));
-    // printf("Raw: %d\tVoltage: %dmV\tPercent: %d\n", adc_reading, voltage, battery_percent);
-    return battery_percent;
+	// Prefer the per-chip eFuse calibration. The fallback is only a rough
+	// approximation: ADC_ATTEN_DB_2_5 puts full scale near 1250mV, not the
+	// 1100mV internal reference.
+	if (adc_cali_handle == NULL ||
+	    adc_cali_raw_to_voltage(adc_cali_handle, adc_reading, &voltage_mv) != ESP_OK) {
+		voltage_mv = (adc_reading * 1250) / 4095;
+	}
 
+	voltage = (uint32_t)voltage_mv;
+
+	// Clamp before subtracting: these are unsigned, and a battery at or below
+	// Vout_min would otherwise wrap the percentage to ~4.29 billion.
+	if (voltage_mv <= (int)Vout_min) {
+		return 0;
+	}
+	if (voltage_mv >= (int)Vout_max) {
+		return 100;
+	}
+
+	return (uint32_t)((voltage_mv - Vout_min) * 100 / (Vout_max - Vout_min));
 }
 
 //initialize battery monitor pin
 void init_batt_monitor(void) {
-    adc_oneshot_unit_init_cfg_t init_config = {
-        .unit_id = ADC_UNIT_1,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
-    };
-    adc_oneshot_new_unit(&init_config, &adc_handle);
+	adc_oneshot_unit_init_cfg_t init_config = {
+		.unit_id = ADC_UNIT_1,
+		.ulp_mode = ADC_ULP_MODE_DISABLE,
+	};
+	esp_err_t err = adc_oneshot_new_unit(&init_config, &adc_handle);
+	if (err != ESP_OK) {
+		ESP_LOGE(TAG, "adc_oneshot_new_unit failed: %s", esp_err_to_name(err));
+		adc_handle = NULL;
+		return;
+	}
 
-    adc_oneshot_chan_cfg_t config = {
-        .atten = atten,
-        .bitwidth = ADC_BITWIDTH_12,
-    };
-    adc_oneshot_config_channel(adc_handle, channel, &config);
+	adc_oneshot_chan_cfg_t config = {
+		.atten = atten,
+		.bitwidth = ADC_BITWIDTH_12,
+	};
+	err = adc_oneshot_config_channel(adc_handle, channel, &config);
+	if (err != ESP_OK) {
+		ESP_LOGE(TAG, "adc_oneshot_config_channel failed: %s", esp_err_to_name(err));
+		return;
+	}
+
+	// Calibration is optional - without eFuse data the fallback above is used.
+	adc_cali_line_fitting_config_t cali_config = {
+		.unit_id = ADC_UNIT_1,
+		.atten = atten,
+		.bitwidth = ADC_BITWIDTH_12,
+	};
+	if (adc_cali_create_scheme_line_fitting(&cali_config, &adc_cali_handle) != ESP_OK) {
+		ESP_LOGW(TAG, "no ADC calibration available, using approximation");
+		adc_cali_handle = NULL;
+	}
 }

@@ -324,7 +324,7 @@ uint16_t check_key_modifier(uint16_t key) {
 
 
 //How to process encoder activity
-void encoder_command(uint8_t command, uint16_t encoder_commands[4]){
+void encoder_command(uint8_t command, uint16_t encoder_commands[ENCODER_SIZE]){
     uint8_t type = encoder_commands[0];
     uint16_t action;
     uint8_t media_state[2] = {0,0};

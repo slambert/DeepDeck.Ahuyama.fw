@@ -76,6 +76,6 @@ void wifi_connection_deinit(void);
  * @brief get ip address
  * 
  */
-void get_ip(void);
+void print_ip_info(void);
 
 #endif /* WIFI_MANAGER_WIFI_MANAGER_H_ */

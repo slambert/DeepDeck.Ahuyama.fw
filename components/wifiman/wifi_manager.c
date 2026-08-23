@@ -419,7 +419,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
  	char ip_str[16];
 	esp_ip4addr_ntoa(&event->ip_info.ip, ip_str, sizeof(ip_str));
-        ESP_LOGI(TAG, "got ip:%s");
+        ESP_LOGI(TAG, "got ip:%s", ip_str);
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -555,7 +555,7 @@ uint8_t wifi_connection_init(void){
 
 }
 
-void print_ip_info() {
+void print_ip_info(void) {
     esp_netif_ip_info_t ip_info;
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {

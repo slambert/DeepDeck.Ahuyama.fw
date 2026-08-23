@@ -153,7 +153,7 @@ void read_gesture()
 }
 
 // How to process gesture activity
-void gesture_command(uint8_t command, uint16_t gesture_commands[5])
+void gesture_command(uint8_t command, uint16_t gesture_commands[GESTURE_SIZE])
 {
 	uint8_t modifier = 0;
 	uint16_t action;
