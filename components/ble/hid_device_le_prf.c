@@ -188,6 +188,19 @@ enum {
 
 static uint16_t battery_table[BAS_IDX_NB];
 
+/// Device Information Service Attributes Indexes
+enum {
+	DIS_IDX_SVC,
+
+	DIS_IDX_PNP_ID_CHAR,
+	DIS_IDX_PNP_ID_VAL,
+
+	DIS_IDX_MANU_NAME_CHAR,
+	DIS_IDX_MANU_NAME_VAL,
+
+	DIS_IDX_NB,
+};
+
 #define HI_UINT16(a) (((a) >> 8) & 0xFF)
 #define LO_UINT16(a) ((a) & 0xFF)
 #define PROFILE_NUM            1
@@ -284,6 +297,56 @@ static const uint16_t char_format_uuid = ESP_GATT_UUID_CHAR_PRESENT_FORMAT;
 
 static uint8_t battary_lev = 50;
 /// Full HRS Database Description - Used to add attributes into the database
+static const uint16_t dis_svc = ESP_GATT_UUID_DEVICE_INFO_SVC;
+static const uint16_t pnp_id_uuid = ESP_GATT_UUID_PNP_ID;
+static const uint16_t manu_name_uuid = ESP_GATT_UUID_MANU_NAME;
+
+/* PnP ID value: vendor ID source, vendor ID, product ID and product version,
+ * all little endian, per the Bluetooth SIG characteristic definition. Hosts
+ * read this to identify the device; with no Device Information Service present
+ * at all, macOS reports a vendor and product ID of 0000. */
+static const uint8_t pnp_id_val[] = {
+	DEEPDECK_VID_SOURCE,
+	LO_UINT16(DEEPDECK_VID), HI_UINT16(DEEPDECK_VID),
+	LO_UINT16(DEEPDECK_PID), HI_UINT16(DEEPDECK_PID),
+	LO_UINT16(DEEPDECK_PRODUCT_VERSION), HI_UINT16(DEEPDECK_PRODUCT_VERSION),
+};
+
+/* GATT strings are not NUL terminated, hence the sizeof() - 1 below. */
+static const uint8_t manu_name_val[] = DEEPDECK_MANUFACTURER;
+
+/// Device Information Service Database Description
+static const esp_gatts_attr_db_t dis_att_db[DIS_IDX_NB] = {
+		// Device Information Service Declaration
+		[DIS_IDX_SVC] = { { ESP_GATT_AUTO_RSP },
+				{ ESP_UUID_LEN_16, (uint8_t *) &primary_service_uuid,
+						ESP_GATT_PERM_READ, sizeof(uint16_t), sizeof(dis_svc),
+						(uint8_t *) &dis_svc } },
+
+		// PnP ID Characteristic Declaration
+		[DIS_IDX_PNP_ID_CHAR] = { { ESP_GATT_AUTO_RSP }, { ESP_UUID_LEN_16,
+				(uint8_t *) &character_declaration_uuid, ESP_GATT_PERM_READ,
+				CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE,
+				(uint8_t *) &char_prop_read } },
+
+		// PnP ID Characteristic Value
+		[DIS_IDX_PNP_ID_VAL] = { { ESP_GATT_AUTO_RSP }, { ESP_UUID_LEN_16,
+				(uint8_t *) &pnp_id_uuid, ESP_GATT_PERM_READ,
+				sizeof(pnp_id_val), sizeof(pnp_id_val),
+				(uint8_t *) pnp_id_val } },
+
+		// Manufacturer Name Characteristic Declaration
+		[DIS_IDX_MANU_NAME_CHAR] = { { ESP_GATT_AUTO_RSP }, { ESP_UUID_LEN_16,
+				(uint8_t *) &character_declaration_uuid, ESP_GATT_PERM_READ,
+				CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE,
+				(uint8_t *) &char_prop_read } },
+
+		// Manufacturer Name Characteristic Value
+		[DIS_IDX_MANU_NAME_VAL] = { { ESP_GATT_AUTO_RSP }, { ESP_UUID_LEN_16,
+				(uint8_t *) &manu_name_uuid, ESP_GATT_PERM_READ,
+				sizeof(manu_name_val) - 1, sizeof(manu_name_val) - 1,
+				(uint8_t *) manu_name_val } }, };
+
 static const esp_gatts_attr_db_t bas_att_db[BAS_IDX_NB] = {
 // Battary Service Declaration
 		[BAS_IDX_SVC] = { { ESP_GATT_AUTO_RSP },
@@ -601,6 +664,9 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 		break;
 	}
 	case ESP_GATTS_CREAT_ATTR_TAB_EVT: {
+		/* Note: dis_att_db happens to have the same attribute count as
+		 * bas_att_db, so the service UUID check below is load bearing - it is
+		 * what stops the Device Information table matching this branch. */
 		if (param->add_attr_tab.num_handle == BAS_IDX_NB
 				&& param->add_attr_tab.svc_uuid.uuid.uuid16
 						== ESP_GATT_UUID_BATTERY_SERVICE_SVC
@@ -623,6 +689,11 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 			hid_add_id_tbl();
 			esp_ble_gatts_start_service(
 					hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
+			/* Device Information last. It is independent of the other two -
+			 * the HID service includes the battery service, which is why that
+			 * one has to be registered first. The event for this table falls
+			 * through to the else below, which starts it. */
+			esp_ble_gatts_create_attr_tab(dis_att_db, gatts_if, DIS_IDX_NB, 0);
 		} else {
 			esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
 		}
