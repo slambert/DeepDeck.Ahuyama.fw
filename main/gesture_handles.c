@@ -27,6 +27,7 @@
 #include "hal_ble.h"
 #include "keypress_handles.h"
 #include "keyboard_config.h"
+#include "deepdeck_tasks.h"
 
 TaskHandle_t xGesture;
 
@@ -118,6 +119,11 @@ void read_gesture()
 		gesture = apds9960_read_gesture(apds9960);
 		if (gesture != APDS9960_NONE)
 		{
+			// A recognised gesture is deliberate input - it is about to fire a
+			// keystroke - so it counts as activity and wakes the screen, the
+			// same way a key press or knob movement does.
+			screensaver_wake();
+
 			if (gesture == APDS9960_DOWN)
 			{
 				ESP_LOGE("Gesture", "_DOWN");

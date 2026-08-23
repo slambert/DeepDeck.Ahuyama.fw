@@ -214,7 +214,7 @@ void app_main()
 	ESP_LOGI("Sleep", "initialized");
 #endif
 
-#ifdef SCREENSAVER_MINS
+#if defined(SCREENSAVER_SECS) && defined(OLED_ENABLE)
 	xTaskCreate(screensaver, "screensaver task", MEM_SCREENSAVER_TASK, NULL, PRIOR_SCREENSAVER_TASK, NULL);
 	ESP_LOGI("Screensaver", "initialized");
 #endif

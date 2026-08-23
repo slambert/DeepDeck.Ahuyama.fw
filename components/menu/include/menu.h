@@ -75,6 +75,10 @@ struct menu_str_t{
     char * title;
     char * subtitle;
 	menu_item_t * menu_item_array;
+	/* Optional. Returns the index the cursor should start on, so a menu that
+	   represents a setting opens on its current value instead of at the top.
+	   NULL (the default for menus that omit it) keeps the old behaviour. */
+	uint8_t (*current_selection)(void);
 };
 
 
@@ -97,8 +101,15 @@ void menu_init(void);
 
 menu_ret menu_goto_sleep(void);
 menu_ret menu_exit(void);
-menu_ret menu_berlin_dance(void);
 menu_ret menu_goto_main(void);
+menu_ret menu_berlin_dance(void);
+
+menu_ret menu_screensaver_off(void);
+menu_ret menu_screensaver_30sec(void);
+menu_ret menu_screensaver_1min(void);
+menu_ret menu_screensaver_10min(void);
+menu_ret menu_screensaver_30min(void);
+uint8_t menu_screensaver_current(void);
 
 menu_ret menu_get_goto_sleep(void);
 menu_ret menu_send_rgb_mode(uint8_t mode);
