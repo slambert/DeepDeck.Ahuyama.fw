@@ -680,14 +680,22 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 					HIDD_LE_IDX_NB, 0);
 			memcpy(battery_table, param->add_attr_tab.handles, sizeof(battery_table));
 		}
-		if (param->add_attr_tab.num_handle == DIS_IDX_NB
-				&& param->add_attr_tab.svc_uuid.uuid.uuid16
-						== ESP_GATT_UUID_DEVICE_INFO_SVC
-				&& param->add_attr_tab.status == ESP_GATT_OK) {
-			ESP_LOGI(HID_LE_PRF_TAG,
-					"device information service added, handle = %d, vid %04x pid %04x",
-					param->add_attr_tab.handles[DIS_IDX_SVC], DEEPDECK_VID,
-					DEEPDECK_PID);
+		/* Device Information is optional; battery and HID are not. Match on the
+		 * service UUID alone rather than also on status, so that a failure here
+		 * still chains on to the battery table - otherwise a device that could
+		 * not publish its vendor ID would come up with no HID service at all. */
+		if (param->add_attr_tab.svc_uuid.uuid.uuid16
+				== ESP_GATT_UUID_DEVICE_INFO_SVC) {
+			if (param->add_attr_tab.status == ESP_GATT_OK) {
+				ESP_LOGI(HID_LE_PRF_TAG,
+						"device information service added, handle = %d, vid %04x pid %04x",
+						param->add_attr_tab.handles[DIS_IDX_SVC], DEEPDECK_VID,
+						DEEPDECK_PID);
+			} else {
+				ESP_LOGE(HID_LE_PRF_TAG,
+						"device information service failed (status %d), continuing without it",
+						param->add_attr_tab.status);
+			}
 			esp_ble_gatts_create_attr_tab(bas_att_db, gatts_if, BAS_IDX_NB, 0);
 		}
 		if (param->add_attr_tab.num_handle == HIDD_LE_IDX_NB
@@ -699,7 +707,7 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 			hid_add_id_tbl();
 			esp_ble_gatts_start_service(
 					hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
-		} else {
+		} else if (param->add_attr_tab.status == ESP_GATT_OK) {
 			esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
 		}
 		break;
@@ -712,13 +720,17 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 
 void hidd_le_create_service(esp_gatt_if_t gatts_if) {
 	/* Tables are added one at a time, each chained off the previous one's
-	 * ESP_GATTS_CREAT_ATTR_TAB_EVT. The order matters twice over:
-	 *   - every table has to be registered before any service is started;
-	 *     a create_attr_tab issued after esp_ble_gatts_start_service()
-	 *     returns ESP_OK but never produces an event.
-	 *   - the battery service has to precede the HID service, because the
-	 *     HID service includes it.
-	 * Device Information is independent, so it goes first. */
+	 * ESP_GATTS_CREAT_ATTR_TAB_EVT. Two things about the order:
+	 *   - the battery service has to precede the HID service, because the HID
+	 *     service includes it.
+	 *   - Device Information goes first because registering it from the HID
+	 *     branch, after esp_ble_gatts_start_service() had been called for the
+	 *     HID service, returned ESP_OK and then never produced an event, so the
+	 *     table was silently never added. The precise constraint in Bluedroid
+	 *     was not established - note that the HID table itself is created from
+	 *     the battery branch, after the Device Information service has already
+	 *     been started, and that works. What is verified is that this ordering
+	 *     registers all three and the other one did not. */
 	esp_ble_gatts_create_attr_tab(dis_att_db, gatts_if, DIS_IDX_NB, 0);
 
 }
