@@ -113,6 +113,8 @@ void init_batt_monitor(void) {
 	err = adc_oneshot_config_channel(adc_handle, channel, &config);
 	if (err != ESP_OK) {
 		ESP_LOGE(TAG, "adc_oneshot_config_channel failed: %s", esp_err_to_name(err));
+		adc_oneshot_del_unit(adc_handle);
+		adc_handle = NULL;
 		return;
 	}
 
@@ -121,6 +123,9 @@ void init_batt_monitor(void) {
 		.unit_id = ADC_UNIT_1,
 		.atten = atten,
 		.bitwidth = ADC_BITWIDTH_12,
+		/* Only consulted on chips with neither Two Point nor Vref burnt into
+		 * eFuse; the scheme refuses to be created if it is left at zero. */
+		.default_vref = DEFAULT_VREF,
 	};
 	if (adc_cali_create_scheme_line_fitting(&cali_config, &adc_cali_handle) != ESP_OK) {
 		ESP_LOGW(TAG, "no ADC calibration available, using approximation");
