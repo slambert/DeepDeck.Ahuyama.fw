@@ -625,10 +625,16 @@ menu_ret menu_get_goto_sleep(void)
 menu_ret menu_send_rgb_mode(uint8_t mode)
 {
   rgb_mode_t led_mode;
+
+  /* Defaults first: nvs_load_led_mode() only overwrites the keys that are
+     actually in NVS, so on a device that has never saved them this used to
+     leave most of the struct as whatever was on the stack. Forcing S here
+     is no longer needed now that hsv2rgb() gets its arguments the right way
+     round. */
+  rgb_mode_defaults(&led_mode);
   nvs_load_led_mode(&led_mode);
-  // int mode_t = mode;
+
   led_mode.mode = mode;
-  led_mode.S = 50;
 
   nvs_save_led_mode(led_mode);
   xQueueSend(keyled_q, &led_mode, 0);

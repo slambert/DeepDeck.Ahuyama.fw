@@ -170,6 +170,14 @@ void nvs_read_layers(dd_layer *layers_array)
 	for (int i = 0; i < layer_num; i++)
 	{
 		sprintf(layer_key, "layer_%d", i);
+
+		/* Zero the destination and say how big it is. dd_layer_size used to be
+		 * passed uninitialised, so nvs_get_blob was told the buffer was
+		 * whatever happened to be on the stack - it only worked by luck, and
+		 * anything the stored blob is shorter than stayed undefined. */
+		memset(&layers_array[i], 0, sizeof(dd_layer));
+		dd_layer_size = sizeof(dd_layer);
+
 		res = nvs_get_blob(nvs_layer_handle, layer_key, (void *)&layers_array[i], &dd_layer_size);
 		if (res != ESP_OK)
 		{
@@ -790,6 +798,18 @@ esp_err_t nvs_load_led_mode(rgb_mode_t *led_mode)
 		nvs_get_u8(nvs_handle, "green", &led_mode->rgb[1]);
 		nvs_get_u8(nvs_handle, "blue", &led_mode->rgb[2]);
 		nvs_close(nvs_handle);
+
+		/* A stored value of 0 renders the animated modes pure black, which is
+		 * indistinguishable from broken. It is also exactly what older firmware
+		 * wrote: the web UI posted only a mode, and the handler filled the rest
+		 * of the struct with zeroes. Treat it as never really set. */
+		if (led_mode->V == 0)
+		{
+			rgb_mode_t defaults;
+
+			rgb_mode_defaults(&defaults);
+			led_mode->V = defaults.V;
+		}
 	}
 	else
 	{

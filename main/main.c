@@ -198,10 +198,9 @@ void app_main()
 #ifdef RGB_LEDS
 	xTaskCreate(rgb_leds_task, "rgb_leds_task", MEM_LEDS_TASK, NULL, PRIOR_LEDS_TASK	, NULL);
 	ESP_LOGI("rgb_leds_task", "initialized");
-	rgb_mode_t mode;
-	nvs_load_led_mode(&mode);
-	xQueueSend(keyled_q, &mode, 0);
-
+	/* The task loads the stored settings itself now. Sending them from here as
+	 * well meant posting an uninitialised struct - and the queue is created
+	 * inside the task, so this also relied on it being scheduled first. */
 #endif
 
 	// Start the keyboard Tasks
