@@ -57,6 +57,7 @@ enum
   MAIN_MENU = 0,
   // BLUETOOTH_MENU,
   LED_MODE_MENU,
+  LED_BRIGHTNESS_MENU,
 #ifdef SCREENSAVER_MENU_ENABLED
   SCREENSAVER_MENU,
 #endif
@@ -70,6 +71,7 @@ char menu_titles[menu_num][MENU_CHAR_NUM] =
         MAIN_MENU_TITLE,
         // "Bluetooth",
         "LED modes",
+        "LED brightness",
 #ifdef SCREENSAVER_MENU_ENABLED
         "Screensaver",
 #endif
@@ -80,16 +82,18 @@ char menu_subtitles[menu_num][MENU_CHAR_NUM] =
         "DeepSea",
         // "DeepDeck",
         "DeepDeck",
+        "Dim the keys",
 #ifdef SCREENSAVER_MENU_ENABLED
         "Blank screen after",
 #endif
 };
 
 // --------------------Main Menu!-------------------------------
-char menu_main_description[5][MENU_CHAR_NUM] =
+char menu_main_description[6][MENU_CHAR_NUM] =
     {
         //"Bluetooth",
         "LED configuration",
+        "LED brightness",
         "Screensaver",
         "DancingBerlin",
         //"Go to Sleep",
@@ -99,11 +103,12 @@ menu_item_t m_main_array[] =
         // Descripción                 //Acción             //Siguiente menu      ó     //Función
         //  {menu_main_description[0],    MA_MENU,                BLUETOOTH_MENU,             0},
         {menu_main_description[0], MA_MENU, LED_MODE_MENU, 0},
+        {menu_main_description[1], MA_MENU, LED_BRIGHTNESS_MENU, 0},
 #ifdef SCREENSAVER_MENU_ENABLED
-        {menu_main_description[1], MA_MENU, SCREENSAVER_MENU, 0},
+        {menu_main_description[2], MA_MENU, SCREENSAVER_MENU, 0},
 #endif
-        {menu_main_description[2], MA_FUNCTION, NONE, &menu_berlin_dance},
-        {menu_main_description[3], MA_FUNCTION, NONE, &menu_exit},
+        {menu_main_description[3], MA_FUNCTION, NONE, &menu_berlin_dance},
+        {menu_main_description[4], MA_FUNCTION, NONE, &menu_exit},
         {0, MA_END, 0, 0}};
 // ------------------Bluetooth Menu-------------------------------
 // char menu_bt_description[2][MENU_CHAR_NUM] =
@@ -120,14 +125,28 @@ menu_item_t m_main_array[] =
 // };
 
 // ------------------LED modes -------------------------------
-char menu_led_mode[6][MENU_CHAR_NUM] =
+char menu_led_mode[8][MENU_CHAR_NUM] =
     {
         "Off",
         "Pulsating",
         "Progressive",
         "Rainbow",
         "Solid",
+        "Layer color",
+        "Key colors",
         "Back"};
+/* Mode number behind each row above, so menu_rgb_mode_current() can map the
+   stored mode back to a row. Kept in the same order, Back excluded. */
+static const uint8_t menu_led_mode_values[] = {
+    RGB_MODE_OFF,
+    RGB_MODE_PULSATING,
+    RGB_MODE_PROGRESSIVE,
+    RGB_MODE_SPARKS,
+    RGB_MODE_SOLID,
+    RGB_MODE_LAYER_COLOR,
+    RGB_MODE_KEY_COLOR,
+};
+
 menu_item_t m_led_array[] =
     {
         // Descripción                 //Acción             //Siguiente menu      ó     //Función
@@ -136,7 +155,49 @@ menu_item_t m_led_array[] =
         {menu_led_mode[2], MA_FUNCTION, NONE, &menu_rgb_mode_2},
         {menu_led_mode[3], MA_FUNCTION, NONE, &menu_rgb_mode_3},
         {menu_led_mode[4], MA_FUNCTION, NONE, &menu_rgb_mode_4},
-        {menu_led_mode[5], MA_FUNCTION, NONE, &menu_goto_main},
+        {menu_led_mode[5], MA_FUNCTION, NONE, &menu_rgb_mode_layer_color},
+        {menu_led_mode[6], MA_FUNCTION, NONE, &menu_rgb_mode_key_color},
+        {menu_led_mode[7], MA_FUNCTION, NONE, &menu_goto_main},
+        {0, MA_END, 0, 0}};
+
+// ------------------LED brightness -------------------------------
+/* The levels, finest first. Everything below is generated from this one list -
+   the row label, the function behind the row, and the table that maps a stored
+   brightness back to a row - so a label can never drift from the value it
+   sets. Menu items take a menu_ret (*)(void), so each level needs its own
+   function; that is what the X macro is spelling out.
+
+   Fine steps at the bottom because that is where the difference shows: the
+   LEDs are far from linear, and everything above about 50% looks much the
+   same. menu_selection2() scrolls, and menu_brightness_current() opens the
+   menu on the level already set, so the length costs little in practice. */
+#define BRIGHTNESS_LEVELS       \
+    X(1) X(2) X(3) X(4) X(5)    \
+    X(6) X(7) X(8) X(9) X(10)   \
+    X(15) X(20) X(25) X(30)     \
+    X(35) X(40) X(45) X(50)     \
+    X(60) X(70) X(80) X(90)     \
+    X(100)
+
+#define X(pct) static menu_ret menu_brightness_##pct(void);
+BRIGHTNESS_LEVELS
+#undef X
+
+// Same order as the menu items below - menu_brightness_current() maps the
+// stored brightness back to a row using this.
+#define X(pct) pct,
+static const uint8_t menu_brightness_values[] = {BRIGHTNESS_LEVELS};
+#undef X
+
+static uint8_t menu_brightness_current(void);
+
+menu_item_t m_led_brightness_array[] =
+    {
+        // Descripción                 //Acción             //Siguiente menu      ó     //Función
+#define X(pct) {#pct " %", MA_FUNCTION, NONE, &menu_brightness_##pct},
+        BRIGHTNESS_LEVELS
+#undef X
+        {"Back", MA_FUNCTION, NONE, &menu_goto_main},
         {0, MA_END, 0, 0}};
 
 // ------------------Screensaver timeout -----------------------
@@ -172,7 +233,8 @@ menu_t menu_array[menu_num] =
         // Title                      //Subtitle                      //Item array
         {menu_titles[MAIN_MENU], menu_subtitles[MAIN_MENU], m_main_array},
         //{menu_titles[BLUETOOTH_MENU], menu_subtitles[BLUETOOTH_MENU], &m_bluetooth_array},
-        {menu_titles[LED_MODE_MENU], menu_subtitles[LED_MODE_MENU], m_led_array},
+        {menu_titles[LED_MODE_MENU], menu_subtitles[LED_MODE_MENU], m_led_array, menu_rgb_mode_current},
+        {menu_titles[LED_BRIGHTNESS_MENU], menu_subtitles[LED_BRIGHTNESS_MENU], m_led_brightness_array, menu_brightness_current},
 #ifdef SCREENSAVER_MENU_ENABLED
         {menu_titles[SCREENSAVER_MENU], menu_subtitles[SCREENSAVER_MENU], m_screensaver_array, menu_screensaver_current},
 #endif
@@ -628,9 +690,7 @@ menu_ret menu_send_rgb_mode(uint8_t mode)
 
   /* Defaults first: nvs_load_led_mode() only overwrites the keys that are
      actually in NVS, so on a device that has never saved them this used to
-     leave most of the struct as whatever was on the stack. Forcing S here
-     is no longer needed now that hsv2rgb() gets its arguments the right way
-     round. */
+     leave most of the struct as whatever was on the stack. */
   rgb_mode_defaults(&led_mode);
   nvs_load_led_mode(&led_mode);
 
@@ -641,6 +701,85 @@ menu_ret menu_send_rgb_mode(uint8_t mode)
 
   return mret_none;
 }
+
+/* Row the cursor should land on when the LED mode menu opens, so it shows the
+   mode that is actually running. Kept in the same order as m_led_array. */
+uint8_t menu_rgb_mode_current(void)
+{
+  rgb_mode_t led_mode;
+  uint8_t i;
+
+  rgb_mode_defaults(&led_mode);
+  nvs_load_led_mode(&led_mode);
+
+  for (i = 0; i < sizeof(menu_led_mode_values) / sizeof(menu_led_mode_values[0]); i++)
+  {
+    if (menu_led_mode_values[i] == led_mode.mode)
+    {
+      return i;
+    }
+  }
+
+  return 0;
+}
+
+/* ------------------ LED brightness ------------------------------ */
+
+static menu_ret menu_set_brightness(uint8_t percent)
+{
+  rgb_mode_t led_mode;
+
+  rgb_mode_defaults(&led_mode);
+  nvs_load_led_mode(&led_mode);
+
+  led_mode.brightness = percent;
+
+  nvs_save_led_mode(led_mode);
+  xQueueSend(keyled_q, &led_mode, 0);
+
+  ESP_LOGI("MENU_LED", "brightness set to %d%%", percent);
+
+  /* Stay on this menu rather than returning to the top. The LEDs change as
+     soon as the queue is read, so with this many levels the useful thing is to
+     step through them and watch, not to walk back in for each one. "Back"
+     leaves. */
+  return mret_none;
+}
+
+/* Closest listed value, so a brightness set over the API to something that is
+   not on the list still highlights the nearest row. */
+static uint8_t menu_brightness_current(void)
+{
+  rgb_mode_t led_mode;
+  uint8_t best = 0;
+  uint16_t best_delta = 0xFFFFu;
+  uint8_t i;
+
+  rgb_mode_defaults(&led_mode);
+  nvs_load_led_mode(&led_mode);
+
+  for (i = 0; i < sizeof(menu_brightness_values) / sizeof(menu_brightness_values[0]); i++)
+  {
+    uint16_t delta = (led_mode.brightness > menu_brightness_values[i])
+                         ? (uint16_t)(led_mode.brightness - menu_brightness_values[i])
+                         : (uint16_t)(menu_brightness_values[i] - led_mode.brightness);
+    if (delta < best_delta)
+    {
+      best_delta = delta;
+      best = i;
+    }
+  }
+
+  return best;
+}
+
+#define X(pct)                            \
+  static menu_ret menu_brightness_##pct(void) \
+  {                                       \
+    return menu_set_brightness(pct);      \
+  }
+BRIGHTNESS_LEVELS
+#undef X
 
 // ToDo: Optimize this
 menu_ret menu_rgb_mode_0(void)
@@ -666,4 +805,14 @@ menu_ret menu_rgb_mode_3(void)
 menu_ret menu_rgb_mode_4(void)
 {
   return menu_send_rgb_mode(4);
+}
+
+menu_ret menu_rgb_mode_layer_color(void)
+{
+  return menu_send_rgb_mode(RGB_MODE_LAYER_COLOR);
+}
+
+menu_ret menu_rgb_mode_key_color(void)
+{
+  return menu_send_rgb_mode(RGB_MODE_KEY_COLOR);
 }

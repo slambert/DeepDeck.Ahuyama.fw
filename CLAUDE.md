@@ -13,10 +13,18 @@ Product docs: <https://deepdeck.co/en/opensource/opensource/>
 | `DeepSea-Developments/DeepDeck.Ahuyama.fw` | This repo — ESP-IDF firmware |
 | `DeepSea-Developments/DeepDeck.Ahuyama.hw` | KiCad hardware / schematics / PCB |
 | `DeepSea-Developments/DeepDeck.programmer` | Desktop flashing tool for end users |
+| `DeepSea-Developments/DeepDeck.Web` | Angular source of the web config UI |
 
-The Angular web-config UI is built elsewhere and lands here **pre-built and gzipped**
-in `spiffs_image/` (`main.js.gz`, `styles.css.gz`, …). Do not try to build it from
-this repo; it is flashed into the `www_0` SPIFFS partition.
+The Angular web-config UI lands here **pre-built and gzipped** in `spiffs_image/`
+(`main.js.gz`, `styles.css.gz`, …) and is flashed into the `www_0` SPIFFS
+partition. It cannot be built from this repo, but the source is in
+`DeepDeck.Web`, which expects to sit **beside** this one — its
+`npm run build-deepdeck` ends in
+`move .\dist\esp-frontend\*.* .\..\DeepDeck.Ahuyama.fw\spiffs_image`. That
+last step is Windows-only (`move`, backslashes); on macOS build with
+`npm run build-prod && npm run compress-artifacts` and copy
+`dist/esp-frontend/` across by hand. Angular 15 / Material 14, and it needs
+`npm install` before anything else.
 
 ---
 
@@ -147,6 +155,48 @@ safe**. Only `oled_task` may draw. Two separate bugs came from ignoring this:
 If you need the display to reflect something, set a flag and let `oled_task`
 draw it. Note also that `update_oled()` erases rows 13–64 on every pass, so only
 the top band survives between frames.
+
+### LED modes, colour and brightness
+
+`key_led_modes()` in `components/rgb_led/src/rgb_led.c` is one task with a mode
+number selecting the effect. Mode numbers are part of the `/api/led` contract
+and are stored in NVS, so they are **fixed and append-only**:
+
+| | |
+|---|---|
+| 0 | off |
+| 1 | pulsating |
+| 2 | progressive |
+| 3 | sparks (the menu calls it Rainbow) |
+| 4 | solid, all 16 keys |
+| 5 | solid, mapped keys only |
+| 6, 7 | *unused, reserved for the fireball/rainbow effects in upstream PR #49* |
+| 8 | per-key colour, from `dd_layer.key_map_colors` |
+| 9 | layer colour, from `dd_layer.layer_color` |
+
+Modes 1–3 animate and redraw every pass. Modes 4, 5, 8 and 9 hold a still image
+and are painted only on demand — when a message lands on `keyled_q`, or when
+`current_layout` changes. Watching the layer is what makes 8 and 9 follow a
+layer switch: `layer_adjust()` does post to `keyled_q`, but the hold-to-use
+layer path does not.
+
+**Brightness** is a percentage in `rgb_mode_t`, applied in `key_set_pixel()` /
+`notif_set_pixel()` where the value reaches the strip — *not* inside
+`hsv2rgb()`, so it dims modes 4, 5, 8 and 9 too, which never call it. It
+defaults to `RGB_LED_BRIGHTNESS_DEFAULT` (50), because the strips are
+uncomfortably bright at full output.
+
+**Colours live in `dd_layer`**, so they follow a layer through create, delete
+and reorder for free. An all-zero `key_map_colors` entry means "not set" and
+falls back to `layer_color`. `color_ver` distinguishes a layer written before
+the colour fields existed — such a blob is shorter than the current struct, so
+`nvs_read_layers()` sees 0 and fills in defaults from a palette, in RAM only.
+It persists on the next write, so there are no flash writes at boot.
+
+**`nvs_load_led_mode()` only overwrites the keys that are actually in NVS**, so
+call `rgb_mode_defaults()` first or the rest of the struct is whatever was on
+the stack. Anything that writes a whole `dd_layer` back has the same hazard —
+seed it from `key_layouts[pos]`, not from a bare declaration.
 
 **`deepdeck_status`** is the OLED/UI state machine: `S_NORMAL`, `S_SETTINGS`,
 `S_SCREENSAVER`. `S_SETTINGS` is entered by long-pressing *both* encoders.

@@ -54,6 +54,109 @@ typedef struct rest_server_context
 	char scratch[SCRATCH_BUFSIZE];
 } rest_server_context_t;
 
+/* Colours cross the API as "#rrggbb". That is what <input type="color"> in the
+ * web UI produces and consumes, so neither side has to convert. */
+#define COLOR_HEX_LEN 8 // "#rrggbb" plus the terminator
+
+static void color_to_hex(dd_key_color_t color, char *out)
+{
+	snprintf(out, COLOR_HEX_LEN, "#%02x%02x%02x", color.r, color.g, color.b);
+}
+
+static int hex_digit(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+/**
+ * @brief Parse "#rrggbb" or "rrggbb" into a colour
+ *
+ * @return true if the whole string was a valid colour, false otherwise. On
+ *         false the colour is left alone, so a caller can seed it with the
+ *         current value and simply ignore a malformed or absent field.
+ */
+static bool hex_to_color(const char *hex, dd_key_color_t *color)
+{
+	uint8_t out[3] = {0, 0, 0};
+
+	if (hex == NULL)
+		return false;
+	if (*hex == '#')
+		hex++;
+
+	for (int i = 0; i < 6; i++)
+	{
+		int digit = hex_digit(hex[i]);
+
+		if (digit < 0)
+			return false;
+
+		if (i & 1)
+			out[i / 2] |= digit;
+		else
+			out[i / 2] = digit << 4;
+	}
+
+	if (hex[6] != '\0')
+		return false;
+
+	color->r = out[0];
+	color->g = out[1];
+	color->b = out[2];
+	return true;
+}
+
+/**
+ * @brief Read the colours for one layer out of a request payload
+ *
+ * Both fields are optional: a client that does not know about colours leaves
+ * whatever the layer already had. "layer_color" is a top level "#rrggbb", and
+ * each key in row0..row3 may carry its own "color".
+ */
+static void fill_layer_colors(cJSON *payload, dd_layer *layer)
+{
+	cJSON *layer_color = cJSON_GetObjectItem(payload, "layer_color");
+
+	if (cJSON_IsString(layer_color))
+	{
+		hex_to_color(layer_color->valuestring, &layer->layer_color);
+	}
+
+	for (int row = 0; row < ROWS; row++)
+	{
+		char row_name[6];
+		cJSON *row_array;
+		cJSON *key;
+		int col = 0;
+
+		snprintf(row_name, sizeof(row_name), "row%d", row);
+		row_array = cJSON_GetObjectItemCaseSensitive(payload, row_name);
+
+		cJSON_ArrayForEach(key, row_array)
+		{
+			cJSON *color;
+
+			if (col >= COLS)
+				break;
+
+			color = cJSON_GetObjectItem(key, "color");
+			if (cJSON_IsString(color))
+			{
+				hex_to_color(color->valuestring, &layer->key_map_colors[row][col]);
+			}
+			col++;
+		}
+	}
+
+	layer->color_ver = DD_LAYER_COLOR_VER;
+}
+
 void *json_malloc(size_t size)
 {
 	return heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
@@ -636,6 +739,11 @@ esp_err_t get_layer_url_handler(httpd_req_t *req)
 
 	cJSON_AddItemToObject(layer_object, "active", is_active);
 
+	char color_hex[COLOR_HEX_LEN];
+
+	color_to_hex(key_layouts[pos].layer_color, color_hex);
+	cJSON_AddStringToObject(layer_object, "layer_color", color_hex);
+
 	for (index = 0; index < MATRIX_ROWS; ++index)
 	{
 		char key_name[7] = {'\0'};
@@ -650,6 +758,8 @@ esp_err_t get_layer_url_handler(httpd_req_t *req)
 			cJSON *key = cJSON_CreateObject();
 			cJSON_AddStringToObject(key, "name", key_layouts[pos].key_map_names[index][index_col]);
 			cJSON_AddNumberToObject(key, "key_code", key_layouts[pos].key_map[index][index_col]);
+			color_to_hex(key_layouts[pos].key_map_colors[index][index_col], color_hex);
+			cJSON_AddStringToObject(key, "color", color_hex);
 			cJSON_AddItemToArray(row, key);
 		}
 	}
@@ -1164,6 +1274,9 @@ esp_err_t update_layer_url_handler(httpd_req_t *req)
 	{
 		temp_layout.active = false;
 	}
+
+	fill_layer_colors(payload, &temp_layout);
+
 	cJSON_Delete(payload);
 	free(buf);
 	nvs_write_layer(temp_layout, pos);
@@ -1353,6 +1466,11 @@ esp_err_t create_layer_url_handler(httpd_req_t *req)
 		i++;
 	}
 
+	/* Give the layer a colour before reading the payload, so a client that does
+	 * not send colours still gets a visible layer rather than a black one. */
+	dd_layer_set_default_colors(&new_layer, nvs_read_num_layers());
+	fill_layer_colors(payload, &new_layer);
+
 	cJSON_Delete(payload);
 	free(buf);
 	current_layout = 0;
@@ -1452,6 +1570,69 @@ esp_err_t restore_default_layer_url_handler(httpd_req_t *req)
 }
 
 /**
+ * @brief Report the current LED settings
+ *
+ * Without this a client has no way to find out the current mode, brightness or
+ * colour, so its controls would start from whatever it guessed and the first
+ * save would overwrite settings made on the device itself.
+ *
+ * @param req
+ * @return esp_err_t
+ */
+esp_err_t get_keyboard_led_handler(httpd_req_t *req)
+{
+	ESP_LOGI(TAG, "HTTP GET LED SETTINGS --> /api/led");
+
+	httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+	httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+
+	rgb_mode_t led_mode;
+	rgb_mode_defaults(&led_mode);
+	nvs_load_led_mode(&led_mode);
+
+	cJSON *led_object = cJSON_CreateObject();
+	if (led_object == NULL)
+	{
+		httpd_resp_set_status(req, HTTPD_400);
+		httpd_resp_send(req, NULL, 0);
+		return ESP_OK;
+	}
+
+	cJSON_AddNumberToObject(led_object, "mode", led_mode.mode);
+	cJSON_AddNumberToObject(led_object, "H", led_mode.H);
+	cJSON_AddNumberToObject(led_object, "S", led_mode.S);
+	cJSON_AddNumberToObject(led_object, "V", led_mode.V);
+	cJSON_AddNumberToObject(led_object, "speed", led_mode.speed);
+	cJSON_AddNumberToObject(led_object, "brightness", led_mode.brightness);
+
+	cJSON *rgb = cJSON_CreateArray();
+	for (int i = 0; i < 3; i++)
+	{
+		cJSON_AddItemToArray(rgb, cJSON_CreateNumber(led_mode.rgb[i]));
+	}
+	cJSON_AddItemToObject(led_object, "rgb", rgb);
+
+	/* Same "#rrggbb" spelling the layer colours use, so a colour input can bind
+	 * to it directly. */
+	char color_hex[COLOR_HEX_LEN];
+	dd_key_color_t solid = {led_mode.rgb[0], led_mode.rgb[1], led_mode.rgb[2]};
+	color_to_hex(solid, color_hex);
+	cJSON_AddStringToObject(led_object, "color", color_hex);
+
+	char *string = cJSON_Print(led_object);
+
+	httpd_resp_set_type(req, "application/json");
+	httpd_resp_sendstr(req, string);
+	httpd_resp_set_status(req, HTTPD_200);
+	httpd_resp_send(req, NULL, 0);
+
+	cJSON_Delete(led_object);
+	free(string);
+
+	return ESP_OK;
+}
+
+/**
  * @brief Change Keyboard LED Color
  *
  * @param req
@@ -1465,8 +1646,8 @@ esp_err_t change_keyboard_led_handler(httpd_req_t *req)
 	httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
 	/* Start from what is already stored rather than from zero. The web UI's LED
 	 * control posts only {"mode": n}, so a zeroed struct meant that changing
-	 * mode also wrote saturation, value and speed back as 0 - which left the
-	 * animated modes black and stopped the pulsating mode decaying. */
+	 * mode also wrote saturation, value, speed and brightness back as 0 - which
+	 * left the animated modes black and stopped the pulsating mode decaying. */
 	rgb_mode_t led_mode;
 	rgb_mode_defaults(&led_mode);
 	nvs_load_led_mode(&led_mode);
@@ -1517,10 +1698,23 @@ esp_err_t change_keyboard_led_handler(httpd_req_t *req)
 		led_mode.speed = speed->valueint;
 	}
 
-	/* Read the colour whenever it is offered, rather than only for the two modes
-	 * that use it, so setting a colour and the mode that shows it can be done in
-	 * either order. Anything not sent keeps its stored value, which is why the
-	 * nvs_load_rgb_color() fallback that used to be here is gone. */
+	/* Global dimming, 0 to 100 percent. Applies to every mode. */
+	cJSON *brightness = cJSON_GetObjectItem(payload, "brightness");
+	if (cJSON_IsNumber(brightness))
+	{
+		int level = brightness->valueint;
+
+		if (level < 0)
+			level = 0;
+		if (level > 100)
+			level = 100;
+
+		led_mode.brightness = level;
+	}
+
+	/* Read the colour whenever it is offered, rather than only for the two
+	 * modes that use it, so setting a colour and the mode that shows it can be
+	 * done in either order. Anything not sent keeps its stored value. */
 	cJSON *rgb_color = cJSON_GetObjectItem(payload, "rgb");
 	if (cJSON_IsArray(rgb_color))
 	{
@@ -1532,6 +1726,21 @@ esp_err_t change_keyboard_led_handler(httpd_req_t *req)
 			{
 				led_mode.rgb[i] = item->valueint;
 			}
+		}
+	}
+
+	/* "#rrggbb" is accepted too, so a colour input can post what it holds
+	 * without the caller taking it apart first. */
+	cJSON *hex_color = cJSON_GetObjectItem(payload, "color");
+	if (cJSON_IsString(hex_color))
+	{
+		dd_key_color_t solid = {led_mode.rgb[0], led_mode.rgb[1], led_mode.rgb[2]};
+
+		if (hex_to_color(hex_color->valuestring, &solid))
+		{
+			led_mode.rgb[0] = solid.r;
+			led_mode.rgb[1] = solid.g;
+			led_mode.rgb[2] = solid.b;
 		}
 	}
 
@@ -1721,6 +1930,9 @@ httpd_handle_t start_webserver(const char *base_path)
 	httpd_register_uri_handler(server, &get_config_url);
 
 	////////LED
+	httpd_uri_t get_led_color_url = {.uri = "/api/led", .method = HTTP_GET, .handler = get_keyboard_led_handler, .user_ctx = NULL};
+	httpd_register_uri_handler(server, &get_led_color_url);
+
 	httpd_uri_t change_led_color_url = {.uri = "/api/led", .method = HTTP_POST, .handler = change_keyboard_led_handler, .user_ctx = NULL};
 	httpd_register_uri_handler(server, &change_led_color_url);
 	httpd_uri_t change_led_color_url__ = {.uri = "/api/led", .method = HTTP_OPTIONS, .handler = change_keyboard_led_handler, .user_ctx = NULL};

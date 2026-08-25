@@ -134,6 +134,31 @@ uint8_t nvs_read_num_layers(void)
 	return layer_num;
 }
 
+/* Distinct colours handed out to layers that have none of their own yet: a
+ * layer read back from a firmware that predates the colour fields, or one
+ * created by a client that does not send them. Without this such a layer would
+ * be black in the colour modes, which looks like a bug rather than a default. */
+static const dd_key_color_t default_layer_colors[] = {
+	{0, 40, 120},  // blue
+	{0, 110, 30},  // green
+	{150, 60, 0},  // amber
+	{90, 0, 110},  // violet
+	{0, 100, 100}, // teal
+	{130, 0, 40},  // magenta
+};
+
+void dd_layer_set_default_colors(dd_layer *layer, uint8_t index)
+{
+	const uint8_t palette_len = sizeof(default_layer_colors) / sizeof(default_layer_colors[0]);
+
+	layer->layer_color = default_layer_colors[index % palette_len];
+	/* All zero means "no colour picked for this key", which falls back to the
+	 * layer colour, so a fresh layer is a single colour until somebody paints
+	 * individual keys. */
+	memset(layer->key_map_colors, 0, sizeof(layer->key_map_colors));
+	layer->color_ver = DD_LAYER_COLOR_VER;
+}
+
 /**
  * @brief Read all the available layers stored in the memory
  *
@@ -171,17 +196,33 @@ void nvs_read_layers(dd_layer *layers_array)
 	{
 		sprintf(layer_key, "layer_%d", i);
 
-		/* Zero the destination and say how big it is. dd_layer_size used to be
-		 * passed uninitialised, so nvs_get_blob was told the buffer was
-		 * whatever happened to be on the stack - it only worked by luck, and
-		 * anything the stored blob is shorter than stayed undefined. */
+		/* Zero the destination first. A blob written by a firmware without the
+		 * colour fields is shorter than the current dd_layer, and nvs_get_blob
+		 * only writes the bytes it stored, so without this the colour fields
+		 * would be whatever malloc() happened to hand back. */
 		memset(&layers_array[i], 0, sizeof(dd_layer));
+
+		/* And say how big the buffer is. This used to be passed uninitialised,
+		 * which meant nvs_get_blob was told the buffer was whatever was on the
+		 * stack and only worked by luck. */
 		dd_layer_size = sizeof(dd_layer);
 
 		res = nvs_get_blob(nvs_layer_handle, layer_key, (void *)&layers_array[i], &dd_layer_size);
 		if (res != ESP_OK)
 		{
 			ESP_LOGE(TAG, "Error (%s) reading layer %s!\n", esp_err_to_name(res), layer_key);
+			continue;
+		}
+
+		/* A pre-colour blob stops short of color_ver, so the memset above
+		 * leaves it 0 and we know the colours are not real. Fill in defaults in
+		 * RAM only - they get committed the next time the layer is written, so
+		 * this costs no flash writes on boot. */
+		if (layers_array[i].color_ver != DD_LAYER_COLOR_VER)
+		{
+			ESP_LOGI(TAG, "Layer %d has no colours stored (%u bytes), using defaults",
+					 i, (unsigned)dd_layer_size);
+			dd_layer_set_default_colors(&layers_array[i], i);
 		}
 	}
 	nvs_close(nvs_layer_handle);
@@ -766,6 +807,7 @@ esp_err_t nvs_save_led_mode(rgb_mode_t led_mode)
 		nvs_set_u8(nvs_handle, "saturation", led_mode.S);
 		nvs_set_u8(nvs_handle, "value", led_mode.V);
 		nvs_set_u8(nvs_handle, "speed", led_mode.speed);
+		nvs_set_u8(nvs_handle, "bright", led_mode.brightness);
 		nvs_set_u8(nvs_handle, "red", led_mode.rgb[0]);
 		nvs_set_u8(nvs_handle, "green", led_mode.rgb[1]);
 		nvs_set_u8(nvs_handle, "blue", led_mode.rgb[2]);
@@ -794,15 +836,18 @@ esp_err_t nvs_load_led_mode(rgb_mode_t *led_mode)
 		nvs_get_u8(nvs_handle, "saturation", &led_mode->S);
 		nvs_get_u8(nvs_handle, "value", &led_mode->V);
 		nvs_get_u8(nvs_handle, "speed", &led_mode->speed);
+		nvs_get_u8(nvs_handle, "bright", &led_mode->brightness);
 		nvs_get_u8(nvs_handle, "red", &led_mode->rgb[0]);
 		nvs_get_u8(nvs_handle, "green", &led_mode->rgb[1]);
 		nvs_get_u8(nvs_handle, "blue", &led_mode->rgb[2]);
 		nvs_close(nvs_handle);
 
-		/* A stored value of 0 renders the animated modes pure black, which is
-		 * indistinguishable from broken. It is also exactly what older firmware
-		 * wrote: the web UI posted only a mode, and the handler filled the rest
-		 * of the struct with zeroes. Treat it as never really set. */
+		/* A stored value of 0 means the animated modes render pure black, which
+		 * is indistinguishable from broken. It is also exactly what older
+		 * firmware wrote: the web UI posted only a mode, and the handler filled
+		 * the rest of the struct with zeroes. Treat it as "never really set"
+		 * and hand back the default - global brightness is the knob for dimming
+		 * now, so there is no reason to keep a stored 0 here. */
 		if (led_mode->V == 0)
 		{
 			rgb_mode_t defaults;

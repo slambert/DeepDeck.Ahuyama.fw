@@ -118,6 +118,13 @@ menu_ret menu_rgb_mode_1(void);
 menu_ret menu_rgb_mode_2(void);
 menu_ret menu_rgb_mode_3(void);
 menu_ret menu_rgb_mode_4(void);
+menu_ret menu_rgb_mode_layer_color(void);
+menu_ret menu_rgb_mode_key_color(void);
+uint8_t menu_rgb_mode_current(void);
+
+/* The per level brightness setters and menu_brightness_current() are generated
+   from one list in menu.c and used only there, so they are static rather than
+   declared here. */
 
 extern menu_t menu_main; 
 extern menu_item_t m_main_array[];

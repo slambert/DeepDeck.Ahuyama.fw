@@ -103,6 +103,19 @@ esp_err_t nvs_delete_macro(dd_macros macro);
 esp_err_t nvs_restore_default_macros(void);
 
 
+/**
+ * @brief Give a layer the default colours for its position
+ *
+ * Used for layers that carry no colour information of their own: read back from
+ * a firmware older than DD_LAYER_COLOR_VER, or created by a client that does
+ * not send colours. Sets layer_color from a small palette indexed by position,
+ * clears the per key colours so they inherit it, and stamps color_ver.
+ *
+ * @param layer
+ * @param index layer position, used to pick a colour from the palette
+ */
+void dd_layer_set_default_colors(dd_layer *layer, uint8_t index);
+
 esp_err_t nvs_save_led_mode(rgb_mode_t led_mode);
 esp_err_t nvs_load_led_mode(rgb_mode_t *led_mode);
 esp_err_t nvs_load_rgb_color(rgb_mode_t *led_mode);
