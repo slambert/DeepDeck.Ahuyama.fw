@@ -299,9 +299,16 @@ sources, subtract every `#define` in the tree, ignore `CONFIG_*` and IDF
 prefixes. The survivors are either deliberate opt-out flags (`BATT_STAT`,
 `SLEEP_MINS`, `USE_MDNS`, `ROW2COL` — all verified consistent) or bugs.
 
-- `keypress_handles.c` is `#include`d, not compiled — it is **not** in
-  `main/CMakeLists.txt`. Adding it there causes duplicate symbols. It also means
-  none of that logic can be unit tested.
+- `keypress_handles.c` is `#include`d by `deepdeck_tasks.c` **and** listed in
+  `main/CMakeLists.txt`, so it is compiled twice. So is `keymap.c`, which
+  `keypress_handles.c` in turn `#include`s. This links only because of static
+  archive semantics: `deepdeck_tasks.c.obj` already defines every symbol
+  anything references, so the linker never extracts the other two members of
+  `libmain.a` and never sees the duplicates. Two consequences — the file must
+  still compile **standalone**, so anything it calls needs a visible
+  declaration (this is why it includes `deepdeck_tasks.h`); and dropping it
+  from `CMakeLists.txt`, or adding a symbol that only the standalone object
+  defines, changes which member gets pulled in.
 - `BATT_STAT` and `SLEEP_MINS` are commented out, so battery monitoring and deep
   sleep are **off by default**.
 - **Both watchdogs are disabled** and `CONFIG_ESP_SYSTEM_PANIC_GDBSTUB=y`, so a
@@ -327,9 +334,9 @@ prefixes. The survivors are either deliberate opt-out flags (`BATT_STAT`,
 - `menu_goto_sleep()` busy-waits with `while (true);` at priority 3 while the
   sleep task it waits for is priority 2. Dead code today (both the menu entry
   and `SLEEP_MINS` are commented out), but a trap.
-- `screensaver_wake()` returns a bool that all four callers discard. It exists so
+- `screensaver_wake()` returns a bool that every caller discards. It exists so
   the waking input can be swallowed — today nudging a knob to see the screen also
-  changes the volume.
+  changes the volume, and the key that wakes it still fires.
 - The web UI ships as pre-built gzipped Angular with **no source in the repo**.
 - Bluedroid is 407KB of a 1.44MB binary. NimBLE would reclaim 200–300KB.
 
