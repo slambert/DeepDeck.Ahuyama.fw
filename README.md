@@ -57,6 +57,7 @@ Here are the features:
         - ✅ 16 keys
         - ✅ Name of the 16 keys (6 characters per key — note this is 6 *bytes*, so accented or symbol characters cost 2–3 each)
         - ✅ 5 actions for each of the 2 knobs, and 6 gestures
+        - ⭐ A color for the layer, and a color for each of the 16 keys
 - ✅ OLED screen
     - ✅ DeepDeck Splash screen
     - ✅ Shows layer name
@@ -75,8 +76,9 @@ Here are the features:
       NVS. The menu opens on the active value.
     - ✅ Change LED settings:
         - ✅ RGB Pattern
+        - ⭐ Layer color and per-key colors, as two more patterns
         - ⭐ A "Back" item, so the submenu can be left without a long press
-        - 🚧 RGB intensity
+        - ⭐ LED brightness, stored in NVS. The menu opens on the active value.
     - 📝 Go to Sleep. The menu entry is commented out, and the handler
       busy-waits at a higher priority than the sleep task it waits for.
     - 📝 Change sleep settings
@@ -92,9 +94,32 @@ Here are the features:
     - 💬 Pong Game
     - 💬 Simon Says Game
     - 📝 Plugins (this will contain connectivity, like API connections, etc)
+- ⭐ RGB LEDs
+    - ✅ Patterns: off, pulsating, progressive, rainbow, and a solid color
+    - ⭐ **Layer color.** Every mapped key lights in the active layer's color, so
+      a glance tells you which layer you are on — blue for Photoshop, purple for
+      Obsidian.
+    - ⭐ **Per-key colors.** Each key gets its own color, stored per layer, so
+      the colors can mean what the keys do on *that* layer. Green for Enter, or
+      one color for a related cluster. A key with no color of its own falls back
+      to the layer color, and keys with nothing mapped stay dark.
+    - ⭐ **Brightness.** A single setting from the OLED menu or the web portal,
+      applied where the color reaches the LED rather than inside the HSV
+      conversion — so it dims every pattern, including the solid and per-key ones
+      that never touch HSV. The strips are uncomfortably bright at full output,
+      so the default is deliberately lower.
+    - Colors are stored with the layer, so they survive creating, deleting and
+      reordering layers. Upgrading from a firmware without them fills in a
+      default palette rather than reading uninitialised memory.
 - 🚧 Web Portal (This is a self host web portal. You would connect to DeepDeck using its WiFi SSID DeepDeck and password xxx)
     - 🚧 Selection of WiFi credentials (SSID and password)
     - 🚧 Modification of Layers
+    - ⭐ LED brightness, pattern and solid color, and a color picker per key in
+      the layer editor
+    - The portal ships pre-built and gzipped in `spiffs_image/`. Its source is a
+      separate Angular project,
+      [DeepDeck.Web](https://github.com/DeepSea-Developments/DeepDeck.Web), and
+      cannot be built from this repository.
 - ⭐ Host identification. The device now publishes a vendor and product ID over
   BLE, so tools that bind input to a specific device — Keyboard Maestro's device
   triggers, for instance — can tell a DeepDeck apart from any other keyboard.
