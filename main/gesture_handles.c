@@ -28,6 +28,7 @@
 #include "keypress_handles.h"
 #include "keyboard_config.h"
 #include "deepdeck_tasks.h"
+#include "nvs_funcs.h"
 
 TaskHandle_t xGesture;
 
@@ -98,6 +99,11 @@ void apds9960_init(i2c_bus_handle_t *i2cbus)
 	apds9960 = apds9960_create(i2c_bus, APDS9960_I2C_ADDRESS);
 
 	apds9960_gesture_init(apds9960);
+
+#ifdef PROXIMITY_WAKE
+	/* A saved value overrides the compiled-in default. */
+	proximity_wake_load();
+#endif
 }
 
 void apds9960_deinit()
@@ -117,6 +123,46 @@ void apds9960_free()
  * They fire on every poll, including when nothing was detected, so at INFO or
  * above they swamp the console. */
 #ifdef PROXIMITY_WAKE
+/* Runtime settings. Seeded from keyboard_config.h, overridden by NVS at startup,
+ * and adjustable over the API - the useful threshold depends on the sensor's
+ * crosstalk, which varies with the cover it sits behind, so it is not something
+ * a compiled-in constant can get right for every unit. */
+static bool proximity_enabled = true;
+static uint8_t proximity_threshold = PROXIMITY_WAKE_THRESHOLD;
+
+void proximity_wake_set(bool enabled, uint8_t threshold)
+{
+	proximity_enabled = enabled;
+
+	/* 0 would wake on the noise floor and never let the panel blank at all. */
+	if (threshold > 0)
+	{
+		proximity_threshold = threshold;
+	}
+
+	ESP_LOGI("Proximity", "wake %s, threshold %u",
+			 proximity_enabled ? "on" : "off", proximity_threshold);
+}
+
+void proximity_wake_get(bool *enabled, uint8_t *threshold)
+{
+	if (enabled != NULL)
+	{
+		*enabled = proximity_enabled;
+	}
+	if (threshold != NULL)
+	{
+		*threshold = proximity_threshold;
+	}
+}
+
+void proximity_wake_load(void)
+{
+	nvs_load_proximity_wake(&proximity_enabled, &proximity_threshold);
+	ESP_LOGI("Proximity", "wake %s, threshold %u",
+			 proximity_enabled ? "on" : "off", proximity_threshold);
+}
+
 void gesture_proximity_wake_check(void)
 {
 	/* Not armed until proximity has been seen BELOW the threshold at least once
@@ -129,6 +175,11 @@ void gesture_proximity_wake_check(void)
 	 * the sensor simply never arms, and is ignored until it moves away. */
 	static bool armed = false;
 	static uint8_t consecutive = 0;
+
+	if (!proximity_enabled)
+	{
+		return;
+	}
 
 	if (!screensaver_is_blanked())
 	{
@@ -151,11 +202,11 @@ void gesture_proximity_wake_check(void)
 	if (proximity >= PROXIMITY_WAKE_DEBUG)
 	{
 		ESP_LOGI("Proximity", "ramp %u (threshold %u, armed %d)",
-				 proximity, PROXIMITY_WAKE_THRESHOLD, (int)armed);
+				 proximity, proximity_threshold, (int)armed);
 	}
 #endif
 
-	if (proximity < PROXIMITY_WAKE_THRESHOLD)
+	if (proximity < proximity_threshold)
 	{
 		armed = true;
 		consecutive = 0;

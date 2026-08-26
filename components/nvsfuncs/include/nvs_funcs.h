@@ -121,6 +121,28 @@ esp_err_t nvs_load_led_mode(rgb_mode_t *led_mode);
 esp_err_t nvs_load_rgb_color(rgb_mode_t *led_mode);
 
 /**
+ * @brief Store the proximity wake settings
+ *
+ * @param enabled   whether an approaching hand wakes the panel
+ * @param threshold proximity reading at or above which it wakes; lower is more
+ *                  sensitive
+ * @return esp_err_t
+ */
+esp_err_t nvs_save_proximity_wake(bool enabled, uint8_t threshold);
+
+/**
+ * @brief Read the proximity wake settings
+ *
+ * Either value is left untouched if it has never been stored, so the caller
+ * keeps its compiled-in default.
+ *
+ * @param enabled
+ * @param threshold
+ * @return esp_err_t ESP_ERR_NVS_NOT_FOUND when never saved
+ */
+esp_err_t nvs_load_proximity_wake(bool *enabled, uint8_t *threshold);
+
+/**
  * @brief Store the screensaver timeout, in seconds (0 = screensaver off)
  *
  * @param seconds idle time before the OLED is blanked

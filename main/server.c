@@ -1570,6 +1570,169 @@ esp_err_t restore_default_layer_url_handler(httpd_req_t *req)
 }
 
 /**
+ * @brief Report the proximity wake settings
+ *
+ * @param req
+ * @return esp_err_t
+ */
+esp_err_t get_proximity_handler(httpd_req_t *req)
+{
+	ESP_LOGI(TAG, "HTTP GET PROXIMITY --> /api/proximity");
+
+	httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+	httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+
+	bool enabled = false;
+	uint8_t threshold = 0;
+
+#ifdef PROXIMITY_WAKE
+	proximity_wake_get(&enabled, &threshold);
+#endif
+
+	cJSON *root = cJSON_CreateObject();
+	if (root == NULL)
+	{
+		httpd_resp_set_status(req, HTTPD_400);
+		httpd_resp_send(req, NULL, 0);
+		return ESP_OK;
+	}
+
+#ifdef PROXIMITY_WAKE
+	cJSON_AddBoolToObject(root, "supported", true);
+#else
+	cJSON_AddBoolToObject(root, "supported", false);
+#endif
+	cJSON_AddBoolToObject(root, "enabled", enabled);
+	cJSON_AddNumberToObject(root, "threshold", threshold);
+
+	/* Reference points measured on the hardware, so a client can label its
+	 * control sensibly instead of guessing at the useful range. */
+	cJSON_AddNumberToObject(root, "min", 5);
+	cJSON_AddNumberToObject(root, "max", 40);
+	cJSON_AddNumberToObject(root, "noise_floor", 9);
+	cJSON_AddNumberToObject(root, "hand_near", 12);
+
+	char *string = cJSON_Print(root);
+
+	httpd_resp_set_type(req, "application/json");
+	httpd_resp_sendstr(req, string);
+	httpd_resp_set_status(req, HTTPD_200);
+	httpd_resp_send(req, NULL, 0);
+
+	cJSON_Delete(root);
+	free(string);
+
+	return ESP_OK;
+}
+
+/**
+ * @brief Change the proximity wake settings
+ *
+ * Accepts either or both of "enabled" and "threshold"; anything absent keeps
+ * its current value.
+ *
+ * @param req
+ * @return esp_err_t
+ */
+esp_err_t set_proximity_handler(httpd_req_t *req)
+{
+	ESP_LOGI(TAG, "HTTP POST PROXIMITY --> /api/proximity");
+
+	httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+	httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+
+	/* Cap the body so a bogus content_len cannot exhaust the heap, and check
+	 * what actually arrived rather than assuming - neither of which the older
+	 * handlers in this file do. */
+	if (req->content_len > 256)
+	{
+		httpd_resp_set_status(req, HTTPD_400);
+		httpd_resp_send(req, NULL, 0);
+		return ESP_OK;
+	}
+
+	char *buf = malloc(req->content_len + 1);
+	if (buf == NULL)
+	{
+		httpd_resp_set_status(req, "500 Internal Server Error");
+		httpd_resp_send(req, NULL, 0);
+		return ESP_OK;
+	}
+
+	int received = httpd_req_recv(req, buf, req->content_len);
+	if (received <= 0)
+	{
+		free(buf);
+		httpd_resp_set_status(req, HTTPD_400);
+		httpd_resp_send(req, NULL, 0);
+		return ESP_OK;
+	}
+	buf[received] = '\0';
+
+	cJSON *payload = cJSON_Parse(buf);
+	free(buf);
+
+	if (payload == NULL)
+	{
+		httpd_resp_set_status(req, HTTPD_400);
+		httpd_resp_send(req, NULL, 0);
+		return ESP_OK;
+	}
+
+	bool enabled = false;
+	uint8_t threshold = 0;
+
+#ifdef PROXIMITY_WAKE
+	proximity_wake_get(&enabled, &threshold);
+
+	cJSON *json_enabled = cJSON_GetObjectItem(payload, "enabled");
+	if (cJSON_IsBool(json_enabled))
+	{
+		enabled = cJSON_IsTrue(json_enabled);
+	}
+
+	cJSON *json_threshold = cJSON_GetObjectItem(payload, "threshold");
+	if (cJSON_IsNumber(json_threshold))
+	{
+		int value = json_threshold->valueint;
+
+		if (value < 1)
+		{
+			value = 1;
+		}
+		if (value > 255)
+		{
+			value = 255;
+		}
+		threshold = (uint8_t)value;
+	}
+
+	proximity_wake_set(enabled, threshold);
+	nvs_save_proximity_wake(enabled, threshold);
+#endif
+
+	cJSON_Delete(payload);
+
+	cJSON *root = cJSON_CreateObject();
+	if (root != NULL)
+	{
+		cJSON_AddBoolToObject(root, "enabled", enabled);
+		cJSON_AddNumberToObject(root, "threshold", threshold);
+
+		char *string = cJSON_Print(root);
+		httpd_resp_set_type(req, "application/json");
+		httpd_resp_sendstr(req, string);
+		cJSON_Delete(root);
+		free(string);
+	}
+
+	httpd_resp_set_status(req, HTTPD_200);
+	httpd_resp_send(req, NULL, 0);
+
+	return ESP_OK;
+}
+
+/**
  * @brief Report the current LED settings
  *
  * Without this a client has no way to find out the current mode, brightness or
@@ -1913,7 +2076,10 @@ httpd_handle_t start_webserver(const char *base_path)
 
 	httpd_handle_t server = NULL;
 	httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-	config.max_uri_handlers = 20;
+	/* Was exactly 20 with all 20 slots used, and httpd_register_uri_handler's
+	 * return value is checked nowhere - so a 21st handler failed silently with
+	 * ESP_ERR_HTTPD_HANDLERS_FULL and the endpoint simply 404'd. */
+	config.max_uri_handlers = 24;
 	config.stack_size = 1024 * 10;
 	config.uri_match_fn = httpd_uri_match_wildcard;
 
@@ -1972,6 +2138,17 @@ httpd_handle_t start_webserver(const char *base_path)
 	httpd_register_uri_handler(server, &option_macros_url);
 	httpd_uri_t restore_all_macro_url = {.uri = "/api/macros/restore", .method = HTTP_POST, .handler = restore_default_macro_url_handler, .user_ctx = NULL};
 	httpd_register_uri_handler(server, &restore_all_macro_url);
+
+	/* Must be registered before the wildcard catch-all below, which is matched
+	 * with httpd_uri_match_wildcard and would otherwise shadow any new GET
+	 * subpath. That is why /api/layers/layer_names works and a later-registered
+	 * GET would not. */
+	httpd_uri_t get_proximity_url = {.uri = "/api/proximity", .method = HTTP_GET, .handler = get_proximity_handler, .user_ctx = NULL};
+	httpd_register_uri_handler(server, &get_proximity_url);
+	httpd_uri_t set_proximity_url = {.uri = "/api/proximity", .method = HTTP_POST, .handler = set_proximity_handler, .user_ctx = NULL};
+	httpd_register_uri_handler(server, &set_proximity_url);
+	httpd_uri_t option_proximity_url = {.uri = "/api/proximity", .method = HTTP_OPTIONS, .handler = options_handler, .user_ctx = NULL};
+	httpd_register_uri_handler(server, &option_proximity_url);
 
 	/* URI handler for getting web server files */
 	httpd_uri_t common_get_uri = {

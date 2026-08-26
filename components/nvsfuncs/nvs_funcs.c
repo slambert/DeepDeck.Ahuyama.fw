@@ -889,6 +889,59 @@ esp_err_t nvs_load_rgb_color(rgb_mode_t *led_mode)
 	return ESP_OK;
 }
 
+esp_err_t nvs_save_proximity_wake(bool enabled, uint8_t threshold)
+{
+	nvs_handle_t nvs_handle;
+	esp_err_t error;
+
+	/* Shares the screensaver namespace: proximity wake exists only to bring the
+	 * screensaver back, so its settings belong beside the timeout. */
+	error = nvs_open(SCREENSAVER_NAMESPACE, NVS_READWRITE, &nvs_handle);
+	if (error != ESP_OK)
+	{
+		ESP_LOGE(TAG, "Error (%s) opening NVS Namespace!: \n", esp_err_to_name(error));
+		return error;
+	}
+
+	error = nvs_set_u8(nvs_handle, "prox_en", enabled ? 1 : 0);
+	if (error == ESP_OK)
+	{
+		error = nvs_set_u8(nvs_handle, "prox_thr", threshold);
+	}
+	if (error == ESP_OK)
+	{
+		error = nvs_commit(nvs_handle);
+	}
+	nvs_close(nvs_handle);
+
+	return error;
+}
+
+esp_err_t nvs_load_proximity_wake(bool *enabled, uint8_t *threshold)
+{
+	nvs_handle_t nvs_handle;
+	esp_err_t error;
+	uint8_t stored;
+
+	error = nvs_open(SCREENSAVER_NAMESPACE, NVS_READWRITE, &nvs_handle);
+	if (error != ESP_OK)
+	{
+		ESP_LOGE(TAG, "Error (%s) opening NVS Namespace!: \n", esp_err_to_name(error));
+		return error;
+	}
+
+	/* Each field is left at whatever the caller seeded it with if it has never
+	 * been saved, so the compiled-in defaults survive. */
+	if (nvs_get_u8(nvs_handle, "prox_en", &stored) == ESP_OK)
+	{
+		*enabled = (stored != 0);
+	}
+	error = nvs_get_u8(nvs_handle, "prox_thr", threshold);
+	nvs_close(nvs_handle);
+
+	return error;
+}
+
 esp_err_t nvs_save_screensaver_secs(uint16_t seconds)
 {
 	nvs_handle_t nvs_handle;
