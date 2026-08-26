@@ -15,7 +15,13 @@
 #include "freertos/event_groups.h"
 #include "oled_tasks.h"
 
-#define FIRMWARE_VERSION "0.5.7"
+/* Upstream main is the 0.5.7 line - the v0.6.x tags live on upstream's develop
+ * branch and are NOT contained here, so a number above 0.6.1 would claim work
+ * this build does not have. Build metadata after the base version says what
+ * this actually is: upstream 0.5.7 plus this fork's changes.
+ * NOTE: this string is concatenated into the OLED menu title, which is size
+ * limited - see the _Static_assert in components/menu/src/menu.c. */
+#define FIRMWARE_VERSION "0.5.7+fork.1"
 #define MODULE_ID "ESP32"
 #define GATTS_TAG "Ahuyama" // The device's name
 #define MAX_BT_DEVICENAME_LENGTH 40

@@ -31,6 +31,16 @@
 #endif
 
 #define MAIN_MENU_TITLE "Main Menu " FIRMWARE_VERSION
+
+/* The title is copied into menu_titles[][MENU_CHAR_NUM]. C lets a string that
+ * exactly fills a char array drop its terminator without complaint, so a longer
+ * FIRMWARE_VERSION would silently ship a menu title that reads off the end of
+ * the array. sizeof includes the NUL, so this fails the build instead.
+ * As of 0.5.7+fork.1 the title is 22 characters in a 23 byte array - it fits,
+ * with exactly one byte to spare. */
+_Static_assert(sizeof(MAIN_MENU_TITLE) <= MENU_CHAR_NUM,
+			   "MAIN_MENU_TITLE (\"Main Menu \" + FIRMWARE_VERSION) does not fit in "
+			   "MENU_CHAR_NUM. Shorten FIRMWARE_VERSION or raise MENU_CHAR_NUM.");
 #define MY_BORDER_SIZE 1
 // #define U8G2_REF_MAN_PIC
 // static const char *TAG = "menu";
