@@ -78,6 +78,11 @@ void screensaver_notify_activity(void)
 	screensaver_activity = true;
 }
 
+bool screensaver_is_blanked(void)
+{
+	return deepdeck_status == S_SCREENSAVER;
+}
+
 bool screensaver_wake(void)
 {
 	screensaver_notify_activity();
@@ -208,6 +213,20 @@ void gesture_task(void *pvParameters)
 		}
 		else
 		{
+#ifdef PROXIMITY_WAKE
+			/* Roughly every 70ms. Each pass of this loop is about 35ms, and
+			 * the check itself does nothing unless the panel is blanked - at
+			 * which point the OLED is powered down and not using the I2C bus,
+			 * so this contends with nothing. Polling faster costs nothing real
+			 * and shortens the delay before the screen comes back. */
+			static uint8_t proximity_tick = 0;
+
+			if (++proximity_tick >= 2)
+			{
+				proximity_tick = 0;
+				gesture_proximity_wake_check();
+			}
+#endif
 			vTaskDelay(pdMS_TO_TICKS(10));
 		}
 

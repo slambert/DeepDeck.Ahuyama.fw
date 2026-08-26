@@ -102,6 +102,15 @@ void screensaver_notify_activity(void);
 bool screensaver_wake(void);
 
 /**
+ * @brief Is the screensaver currently blanking the panel?
+ *
+ * Lets other subsystems ask the question without needing the UI state enum.
+ *
+ * @return true while the panel is blanked
+ */
+bool screensaver_is_blanked(void);
+
+/**
  * @brief Set the idle timeout in seconds. 0 disables the screensaver.
  *
  * Only changes the running value - persist it with nvs_save_screensaver_secs().

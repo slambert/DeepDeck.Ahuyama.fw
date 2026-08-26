@@ -105,6 +105,44 @@
 //deep sleep parameters, mind that reconnecting after deep sleep might take a minute or two
 //#define SLEEP_MINS 50 // undefine if you do not need deep sleep, otherwise define number of minutes for deepsleep
 
+// Proximity wake. Reaching toward the pad brings the OLED back without pressing
+// anything. Requires GESTURE_ENABLE, since it uses the same APDS-9960.
+//
+// Sampled ONLY while the screensaver has the panel blanked, which is the only
+// time the answer is useful - so it costs nothing while you are actually using
+// the keyboard, and cannot be confused by a hand resting on the keys.
+//
+// Measured on an Ahuyama: an empty desk reads 0-4 (99th percentile 4), a hand
+// over the sensor reads 41-43. The threshold sits in that gap. Comment out
+// PROXIMITY_WAKE to disable.
+#define PROXIMITY_WAKE
+#define PROXIMITY_WAKE_THRESHOLD 10
+
+// Tuning aid, off by default. Uncomment to log every proximity reading at or
+// above this value while the panel is blanked - which is how the numbers in the
+// comment above were measured. Useful on different hardware, or if the sensor
+// ends up behind a different cover, since the crosstalk floor depends on both.
+// #define PROXIMITY_WAKE_DEBUG 3
+
+// Biased toward false positives: waking when you were not reaching is a shrug,
+// failing to wake when you were is the feature not working. Measured on an
+// Ahuyama, at the driver's default 4x gain and 8 pulses:
+//
+//   empty desk   0-4 typically, 9 at the very worst (2 samples in 611)
+//   hand at the moment it becomes visible   12-25
+//   hand close   42
+//
+// 10 sits above the worst observed noise and below the weakest real detection,
+// and two CONSECUTIVE samples are required on top of that.
+//
+// Raising PGAIN to 8x and the pulse count was tried and REVERTED: it lifted the
+// noise floor from 3 to 12-18 while the hand signal only went 42 -> 104, which
+// halved the signal-to-noise ratio and produced real false wakes. The floor is
+// crosstalk - the sensor seeing its own LED reflected off the cover - so it
+// scales with LED energy just as fast as the signal does. If more range is ever
+// needed, the lever is the POFFSET_UR/POFFSET_DL registers (0x9D/0x9E, both
+// default 0) to cancel that crosstalk first, NOT more gain.
+
 // Screensaver. Blanks the OLED after this many SECONDS without a key press,
 // knob movement or gesture. This is only the default: the timeout is adjustable
 // from the OLED menu (Screensaver) and stored in NVS, where 0 means "never

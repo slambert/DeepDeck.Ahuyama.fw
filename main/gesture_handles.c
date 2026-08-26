@@ -116,6 +116,73 @@ void apds9960_free()
  *     esp_log_level_set("Gesture", ESP_LOG_DEBUG);
  * They fire on every poll, including when nothing was detected, so at INFO or
  * above they swamp the console. */
+#ifdef PROXIMITY_WAKE
+void gesture_proximity_wake_check(void)
+{
+	/* Not armed until proximity has been seen BELOW the threshold at least once
+	 * since the panel blanked. Without this, anything already sitting in front
+	 * of the sensor when the screensaver kicks in - a hand still resting there,
+	 * a mug, a stack of paper - would wake the screen again immediately and go
+	 * on doing it forever, so the screensaver could never take effect.
+	 *
+	 * It also means no baseline tracking is needed: something parked in front of
+	 * the sensor simply never arms, and is ignored until it moves away. */
+	static bool armed = false;
+	static uint8_t consecutive = 0;
+
+	if (!screensaver_is_blanked())
+	{
+		/* Awake: nothing to do, and nothing sampled. Reset so the next blank
+		 * starts from a known state. */
+		armed = false;
+		consecutive = 0;
+		return;
+	}
+
+	if (apds9960 == NULL)
+	{
+		return;
+	}
+
+	uint8_t proximity = apds9960_read_proximity(apds9960);
+
+#ifdef PROXIMITY_WAKE_DEBUG
+	/* TEMPORARY. Quiet on an empty desk, since idle sits at 0-2. */
+	if (proximity >= PROXIMITY_WAKE_DEBUG)
+	{
+		ESP_LOGI("Proximity", "ramp %u (threshold %u, armed %d)",
+				 proximity, PROXIMITY_WAKE_THRESHOLD, (int)armed);
+	}
+#endif
+
+	if (proximity < PROXIMITY_WAKE_THRESHOLD)
+	{
+		armed = true;
+		consecutive = 0;
+		return;
+	}
+
+	if (!armed)
+	{
+		return;
+	}
+
+	/* Two consecutive samples, so a single noisy reading cannot wake the panel. */
+	if (++consecutive < 2)
+	{
+		return;
+	}
+
+	ESP_LOGI("Proximity", "proximity %u, waking the screen", proximity);
+	armed = false;
+	consecutive = 0;
+
+	/* Note this deliberately does NOT run gesture_command() - approaching is not
+	 * input, it just means "look alive". Nothing is typed. */
+	screensaver_wake();
+}
+#endif /* PROXIMITY_WAKE */
+
 void read_gesture()
 {
 	uint8_t gesture = 0;

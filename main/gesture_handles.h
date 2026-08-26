@@ -63,6 +63,16 @@ void apds9960_free();
 void apds9960_init(i2c_bus_handle_t *i2cbus);
 // read  apds9960 gesture
 void read_gesture();
+
+#ifdef PROXIMITY_WAKE
+/**
+ * @brief Wake the OLED when a hand approaches, without sending any keystroke
+ *
+ * Cheap to call and self-gating: it returns immediately unless the screensaver
+ * currently has the panel blanked, so it does no I2C work during normal use.
+ */
+void gesture_proximity_wake_check(void);
+#endif
 //configure interrup input pin for gesture detection
 void config_interrup_pin(void);
 void disable_interrup_pin(void);
