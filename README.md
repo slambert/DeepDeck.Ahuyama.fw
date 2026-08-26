@@ -71,6 +71,12 @@ Here are the features:
     - ⭐ Screensaver, to prevent the burn-in reported in upstream issue #20.
       Blanks the panel after a period without input; wakes on any key, knob or
       gesture.
+    - ⭐ **Wake on approach.** Reaching toward the pad brings the screen back
+      before you touch anything, using the gesture sensor's proximity reading.
+      Only measured while the screen is off, so it costs nothing in normal use,
+      and it ignores anything already sitting in front of the sensor so the
+      screensaver still works. Nothing is typed — approaching is not input.
+      Sensitivity is adjustable from the web portal and remembered.
 - ✅Embedded OLED menu (hold both knobs down to activate)
     - ⭐ Screensaver timeout: Off / 30 sec / 1 min / 10 min / 30 min, stored in
       NVS. The menu opens on the active value.
@@ -116,6 +122,7 @@ Here are the features:
     - 🚧 Modification of Layers
     - ⭐ LED brightness, pattern and solid color, and a color picker per key in
       the layer editor
+    - ⭐ Wake-on-approach on/off and sensitivity
     - The portal ships pre-built and gzipped in `spiffs_image/`. Its source is a
       separate Angular project,
       [DeepDeck.Web](https://github.com/DeepSea-Developments/DeepDeck.Web), and
