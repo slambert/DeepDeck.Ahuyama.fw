@@ -198,6 +198,51 @@ call `rgb_mode_defaults()` first or the rest of the struct is whatever was on
 the stack. Anything that writes a whole `dd_layer` back has the same hazard —
 seed it from `key_layouts[pos]`, not from a bare declaration.
 
+### Wake on approach (proximity)
+
+`gesture_proximity_wake_check()` in `main/gesture_handles.c`, called from
+`gesture_task`'s idle branch roughly every 70ms. It reads the APDS-9960's
+proximity register and calls `screensaver_wake()` when a hand is close.
+
+Three things about it are deliberate and easy to undo by accident:
+
+- **It only samples while the panel is blanked**, gated on
+  `screensaver_is_blanked()`. That is the only time the answer matters, so
+  normal use costs no I2C traffic - and while blanked the OLED is powered down
+  and off the bus, so the polling contends with nothing. Sampling during use
+  would also mean a hand on the keys looked like an approach.
+- **It arms only after seeing a reading below the threshold.** Anything already
+  in front of the sensor when the screen blanks - a hand, a mug, a stack of
+  paper - would otherwise re-wake it forever and the screensaver could never
+  take effect. This is also why no baseline tracking is needed.
+- **It does not call `gesture_command()`.** Approaching means "look alive", not
+  input, so nothing is typed. Contrast `read_gesture()`, which does both.
+
+The threshold is runtime state (`proximity_wake_set/get/load`), seeded from
+`PROXIMITY_WAKE_THRESHOLD` in `keyboard_config.h`, overridden from the
+`screensaver` NVS namespace, and settable over `GET`/`POST /api/proximity`. It
+has to be adjustable because the useful value depends on the sensor's
+**crosstalk** - it seeing its own LED reflected off the cover - which varies
+with the enclosure.
+
+Measured on an Ahuyama at the driver's default gain: empty desk 0-4 (worst 9 in
+611 samples), hand as it becomes visible 12-25, hand close 42. The signal is
+effectively **binary rather than a ramp**, crossing in one or two samples, so the
+threshold picks a point on a steep edge and does little to change range.
+
+**Do not try to get more range by raising `PGAIN` or the pulse count.** It was
+tried: the noise floor went 3 -> 12-18 while the hand signal only went
+42 -> 104, halving the signal-to-noise ratio and causing real false wakes. The
+floor is crosstalk, so it scales with LED energy as fast as the signal. The lever
+is `POFFSET_UR`/`POFFSET_DL` (0x9D/0x9E, both default 0) to cancel the offset
+first. Note also that the vendored driver re-runs `apds9960_gesture_init()` on
+internal error paths, which **silently resets `PGAIN` and `PPULSE`** - any sensor
+tuning done outside that function will fall off unpredictably.
+
+`PROXIMITY_WAKE_DEBUG` in `keyboard_config.h`, commented out, logs the readings
+while blanked. That is how all of the above was measured and how to re-measure
+behind a different cover.
+
 **`deepdeck_status`** is the OLED/UI state machine: `S_NORMAL`, `S_SETTINGS`,
 `S_SCREENSAVER`. `S_SETTINGS` is entered by long-pressing *both* encoders.
 
@@ -313,6 +358,9 @@ Served from the device's AP/STA IP; `/*` falls through to gzipped SPIFFS assets.
 POST   /api/connect            Wi-Fi credentials
 GET    /api/config             device config
 POST   /api/led                LED color/mode
+GET    /api/led                current LED settings
+GET    /api/proximity          wake-on-approach state + measured reference points
+POST   /api/proximity          wake-on-approach enable / threshold
 GET    /api/layers             list layers
 GET    /api/layers/layer_names
 POST   /api/layers             create
@@ -365,6 +413,12 @@ prefixes. The survivors are either deliberate opt-out flags (`BATT_STAT`,
   on that row. Menus omitting it get `NULL` and behave as before.
 - `IRAM is ~95% used` (about 6.7KB free). Anything `IRAM_ATTR` hits that wall
   long before flash.
+- `config.max_uri_handlers` in `server.c` is a hard cap on HTTP routes, and
+  `httpd_register_uri_handler`'s return value is checked **nowhere** - so
+  exceeding it fails silently and the endpoint just 404s. It was exactly full at
+  20 before the proximity routes; it is 24 now. New GET routes must also be
+  registered **before** the wildcard `/*` catch-all, which would otherwise
+  shadow them.
 - There are **no automated tests and no CI**. Verification means flashing.
 
 ---
